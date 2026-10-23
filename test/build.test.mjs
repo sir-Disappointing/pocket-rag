@@ -67,6 +67,7 @@ test("settings contain texts and limits but no secrets", () => {
   assert.equal(s.suggestions.length, 3);
   assert.ok(!("suggestions" in s.strings));
   assert.ok(!/sk-ant/.test(JSON.stringify(s)));
+  assert.equal(makeSettings(loadConfig(EXAMPLE, { storageKey: "old.key" })).storageKey, "old.key");
 });
 
 test("unknown language and missing name are reported", () => {

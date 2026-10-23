@@ -48,6 +48,13 @@ test("custom synonyms and phrases from the knowledge base", () => {
   assert.equal(retrieve(k, "how quick in town?")[0].id, "speed");
 });
 
+test("own stopwords are ignored", () => {
+  const k = { ...EN, chunks: [...EN.chunks, chunk("sign-list", "Sign list", "sign sign sign sign")] };
+  const ids = (kb) => retrieve(kb, "Which sign means give way?").map((c) => c.id);
+  assert.ok(ids(k).includes("sign-list"));
+  assert.deepEqual(ids({ ...k, stopwords: ["Sign"] }), ["signs#b6"]);
+});
+
 test("keys match literally, also with a space", () => {
   assert.equal(retrieve(EN, "What does B6 mean?")[0].id, "signs#b6");
   assert.equal(retrieve(EN, "and b 6?")[0].id, "signs#b6");

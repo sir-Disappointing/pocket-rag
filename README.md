@@ -31,6 +31,8 @@ Then add this to your page:
 
 That's it. Without a proxy, the widget asks visitors for their own API key.
 
+**Live demo:** [sir-disappointing.github.io/pocket-rag](https://sir-disappointing.github.io/pocket-rag/) (the example below; bring your own API key).
+
 To try the included example (a chess rules site) from a clone of this repo:
 
 ```sh
@@ -72,6 +74,7 @@ Keys match without spaces and punctuation too, so `B6` also finds "b 6".
   "core": ["core.md"],                       // always sent (cached)
   "instructions": "instructions.md",         // optional: replace the default instructions (file or text)
 
+  "stopwords": ["chess"],                    // words that are everywhere in your content, so they say nothing
   "synonyms": { "horse": ["knight"] },       // everyday word → words used in your content
   "phrases": { "who starts": ["moves first"] },  // multi-word phrase → search terms
   "tuning": { "maxChunks": 10, "maxChars": 7000, "minRatio": 0.3, "boost": { "guide/": 1.25 } },
@@ -85,6 +88,7 @@ Keys match without spaces and punctuation too, so `B6` also finds "b 6".
   "effort": "low",
   "maxHistory": 12,                          // messages of the conversation that are sent along
   "maxQuestion": 2000,                       // characters
+  "storageKey": "",                          // optional: localStorage key for the visitor's API key
 
   "ui": {                                    // any text in src/lang/<lang>.mjs → strings can be overridden here
     "welcome": "Hi! Ask me anything about the rules of chess.",
