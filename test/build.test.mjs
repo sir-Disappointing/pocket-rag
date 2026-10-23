@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { build, check, chunkMarkdown, chunkJson, chunkText, plain, makeSettings, loadConfig } from "../src/build.mjs";
+import { build, chunkMarkdown, chunkJson, chunkText, chunkHtml, mdxToMarkdown, plain, makeSettings, loadConfig } from "../src/build.mjs";
+import { runChecks } from "../src/diagnose.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const EXAMPLE = path.join(ROOT, "example", "pocket-rag.config.json");
@@ -44,6 +45,24 @@ test("long sections are split at paragraphs", () => {
   assert.ok(chunks.length >= 2);
   assert.equal(chunks[0].id, "t#long~1");
   assert.equal(chunks[0].title, "T › Long (1)");
+});
+
+test("chunkHtml: main content split at h2/h3, chrome left out, ids from id attributes", () => {
+  const html = `<html><head><title>Hours | Bakery</title><script>x()</script></head><body><header><nav>Home</nav></header><main>
+    <h1>Opening hours</h1><p>Open &amp; friendly.</p><h2 id="weekend">Weekend</h2><!-- keys: SAT1 --><p>Saturday 8&ndash;16.</p>
+    <ul><li>Sunday closed</li><li>Holidays vary</li></ul><h3>Prices</h3><table><tr><td>Bread</td><td>&euro;3</td></tr></table></main><footer>© us</footer></body></html>`;
+  assert.deepEqual(chunkHtml(html, "hours.html"), [
+    { id: "hours", title: "Opening hours", text: "Open & friendly." },
+    { id: "hours#weekend", title: "Opening hours › Weekend", text: "Saturday 8–16.\n\n- Sunday closed\n- Holidays vary", keys: ["SAT1"] },
+    { id: "hours#prices", title: "Opening hours › Prices", text: "Bread €3" },
+  ]);
+  assert.equal(chunkHtml("<html><head><title>Only title | Site</title></head><body><p>Hi</p></body></html>", "x.html")[0].title, "Only title | Site");
+});
+
+test("chunkMarkdown keeps {#custom-id} anchors; MDX loses imports and components", () => {
+  assert.deepEqual(chunkMarkdown("# Guide\n\n## Install {#setup}\nRun it.", "g.md").map((c) => [c.id, c.title]), [["g#setup", "Guide › Install"]]);
+  const md = mdxToMarkdown('import X from "y"\n\n# T\n\n<Note type="x">Keep this</Note>\n<Chart />\n## H\nText');
+  assert.ok(!md.includes("import") && !md.includes("<") && md.includes("Keep this"));
 });
 
 test("chunkJson validates and keeps ids and keys", () => {
@@ -92,12 +111,13 @@ test("build writes the widget files, and the Worker without overwriting your cod
   const out = path.join(dir, "site");
   const worker = path.join(dir, "worker");
   const { knowledge } = build(EXAMPLE, quiet, { out, worker });
-  for (const f of ["widget.js", "widget.css", "retrieve.mjs", "lang/en.mjs", "lang/nl.mjs", "knowledge.json", "settings.json"]) {
+  for (const f of ["widget.js", "widget.css", "retrieve.js", "lang/en.js", "lang/nl.js", "knowledge.json", "settings.json"]) {
     assert.ok(fs.existsSync(path.join(out, f)), f);
   }
   for (const f of ["src/index.js", "src/knowledge.js", "src/settings.js", "src/retrieve.mjs", "wrangler.toml", "package.json"]) {
     assert.ok(fs.existsSync(path.join(worker, f)), f);
   }
+  assert.match(fs.readFileSync(path.join(out, "retrieve.js"), "utf8"), /from "\.\/lang\/en\.js"/);
   assert.ok(knowledge.core.startsWith("You are the assistant of Chess Rules Explained"));
   assert.ok(knowledge.core.includes("# Quick facts"));
   assert.ok(knowledge.chunks.some((c) => c.id === "special-moves#castling" && c.keys.includes("O-O")));
@@ -111,8 +131,7 @@ test("build writes the widget files, and the Worker without overwriting your cod
 });
 
 test("the example passes its own checks", () => {
-  const lines = [];
-  const { failed, total } = check(EXAMPLE, (l) => lines.push(l));
-  assert.equal(failed, 0, lines.join("\n"));
-  assert.ok(total >= 20);
+  const r = runChecks(loadConfig(EXAMPLE));
+  assert.equal(r.failed, 0, JSON.stringify(r.cases.filter((c) => !c.ok), null, 1));
+  assert.ok(r.total >= 20);
 });

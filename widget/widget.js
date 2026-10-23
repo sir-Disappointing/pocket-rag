@@ -248,7 +248,7 @@ async function request(messages, onText) {
   if (!state.knowledge) {
     const [knowledge, retrieve] = await Promise.all([
       fetch(new URL("knowledge.json", BASE)).then((r) => r.json()),
-      import(new URL("retrieve.mjs", BASE).href),
+      import(new URL("retrieve.js", BASE).href),
     ]);
     state.knowledge = knowledge;
     state.retrieve = retrieve;

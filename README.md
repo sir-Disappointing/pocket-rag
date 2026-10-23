@@ -1,6 +1,6 @@
 # pocket-rag
 
-A tiny "ask this site" assistant for static sites. You give it a folder of Markdown, and your visitors get a chat button that answers questions from that content, using Claude.
+A tiny "ask this site" assistant for static sites. Point it at your site's Markdown or HTML, and your visitors get a chat button that answers questions from that content, using Claude.
 
 - **No vector database, no embeddings, no server you have to run.** A keyword search (BM25 with stemming and synonyms) picks the few pieces of content that fit each question. For a site of a few hundred pages that works well, and you can test it.
 - **Cheap.** Each question sends a short core (cached) plus a handful of matching pieces, about 1–3k input tokens. Answers are kept short. With Claude Haiku that's well under a tenth of a cent per question.
@@ -11,25 +11,48 @@ A tiny "ask this site" assistant for static sites. You give it a folder of Markd
 
 It started as the "Vraag het" assistant on [Theorie Oefenen](https://github.com/sir-Disappointing/drive-alone), a free practice site for the Dutch driving theory exam.
 
-## Quick start
+## Set it up with your AI assistant
+
+Paste this into Claude Code, Cursor, Copilot or any coding assistant, in your site's repository:
+
+> Add pocket-rag to this site. Follow https://raw.githubusercontent.com/sir-Disappointing/pocket-rag/main/SETUP.md
+
+The [setup guide](SETUP.md) takes it through every step, and asks you just one thing: whether visitors bring their own API key or you pay through a proxy. The CLI tells the assistant what to do next and checks the result:
+- `init` detects your framework, published folder, content and language;
+- `check` explains every search miss and suggests the fix;
+- `doctor` checks the whole setup, from the script tag to your Content-Security-Policy.
+
+## Quick start (by hand)
 
 Requires Node 20 or newer.
 
 ```sh
 cd your-site
-npx github:sir-Disappointing/pocket-rag init     # creates pocket-rag.config.json, content/ and checks.json
-# write your content in content/*.md and edit the config
-npx github:sir-Disappointing/pocket-rag build    # writes pocket-rag/ next to your page
-npx github:sir-Disappointing/pocket-rag check    # tests the search against checks.json
+npx github:sir-Disappointing/pocket-rag#v0.3.0 init     # looks at your site, writes pocket-rag.config.json and checks.json
+# check the config: content folders, "about", "scope"
+npx github:sir-Disappointing/pocket-rag#v0.3.0 build    # writes the widget into your site's published folder
+npx github:sir-Disappointing/pocket-rag#v0.3.0 doctor   # checks the setup and says what's missing
 ```
 
-Then add this to your page:
+Then add this to your pages (`init` prints the right line for your framework):
 
 ```html
 <script type="module" src="pocket-rag/widget.js"></script>
 ```
 
-That's it. Without a proxy, the widget asks visitors for their own API key.
+Without a proxy, the widget asks visitors for their own API key. [SETUP.md](SETUP.md) covers privacy, theming, testing the search and keeping it up to date.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `pocket-rag init` | Detects the framework (plain HTML, Hugo, Jekyll, Eleventy, Astro, Next.js, Vite, Docusaurus, VitePress, MkDocs), the published folder, content folders, language and name, and writes the config. |
+| `pocket-rag build` | Builds the knowledge base and copies the widget into `out` (and the Worker's data into `worker`). |
+| `pocket-rag ask "question"` | Shows the search terms, which sections a question gets with their scores and matched words, and words that appear nowhere in your content. `--previous "…"` for follow-ups. |
+| `pocket-rag check` | Runs `checks.json`. For each miss it explains why (a word that's nowhere in the content, a section that ranks too low, a wrong id) and suggests the fix. |
+| `pocket-rag doctor` | Checks the whole setup: content, core size, build up to date, output folder published, script tag present and a module, CSP, proxy, privacy link, API keys in the site, checks. Every problem comes with its fix. |
+
+All commands take `--config <file>`. `ask`, `check`, `doctor` and `init` also take `--json` for machine-readable output. `check` and `doctor` exit with an error code on problems, so they work in CI.
 
 **Live demo:** [sir-disappointing.github.io/pocket-rag](https://sir-disappointing.github.io/pocket-rag/) (the example below; bring your own API key).
 
@@ -42,9 +65,10 @@ npx serve example/site   # or any static server, then open the page
 
 ## Content
 
-Put your content in the folders listed under `content`. Supported formats:
+Put your content in the folders listed under `content`; `node_modules`, build output and pocket-rag's own folders are skipped, and `"exclude"` leaves out more (paths relative to the config). Supported formats:
 
-- **Markdown (`.md`)**: every `##` (or deeper) heading becomes a separate piece. Its title is "Page title › Heading", and its id is `path/file#heading-slug`. Text before the first `##` is a piece too. Long sections are split at paragraphs.
+- **Markdown (`.md`, `.mdx`)**: every `##` (or deeper) heading becomes a separate piece. Its title is "Page title › Heading", and its id is `path/file#heading-slug` (or `#custom-id` with `## Heading {#custom-id}`). Text before the first `##` is a piece too. Long sections are split at paragraphs. In MDX, imports and components are dropped.
+- **HTML (`.html`)**: the page's `<main>` (or `<article>`, or `<body>`) is split at `<h2>` and `<h3>`; navigation, header, footer, scripts and forms are left out. Ids use the headings' `id` attributes when they have one. So a plain HTML site can point `content` at its own pages.
 - **JSON (`.json`)**: an array of `{ "id", "title", "text", "keys" }` (only `title` and `text` are required), or `{ "chunks": [...] }`. Handy for FAQs or anything you generate from a database.
 - **Plain text (`.txt`)**: split at paragraphs, titled after the file name.
 
@@ -71,6 +95,7 @@ Keys match without spaces and punctuation too, so `B6` also finds "b 6".
   "lang": "en",                              // "en" or "nl": search rules and default texts
 
   "content": ["content"],                    // folders or files to search
+  "exclude": ["content/drafts"],             // optional: leave these out
   "core": ["core.md"],                       // always sent (cached)
   "instructions": "instructions.md",         // optional: replace the default instructions (file or text)
 
@@ -115,7 +140,7 @@ Keys match without spaces and punctuation too, so `B6` also finds "b 6".
 ]
 ```
 
-`pocket-rag check` reports every miss with what was found instead, and exits with an error code, so you can run it in CI. When something is missed, the fix is usually a synonym, a phrase, a key, or a clearer heading.
+`pocket-rag check` reports every miss with what was found instead, why, and what to change, and exits with an error code, so you can run it in CI. The fix is usually a synonym (for a word that appears nowhere in your content), a phrase, a key, or a clearer heading. `pocket-rag ask "question"` shows the details of a single question.
 
 ## The widget
 
@@ -206,7 +231,7 @@ Copy `src/lang/en.mjs` to `src/lang/<code>.mjs`, translate the stopwords, word v
 ## Development
 
 ```sh
-npm test                    # unit tests: search, build, Worker (no dependencies)
+npm test                    # unit tests: search, build, detection, check/doctor, Worker (no dependencies)
 npm run example             # build and check the example
 node test/e2e/browser.mjs   # browser test of the widget (needs Playwright)
 ```
