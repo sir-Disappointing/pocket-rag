@@ -1,0 +1,14 @@
+name = "pocket-rag"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Sites that may use this proxy, comma-separated. No trailing slash.
+ALLOWED_ORIGINS = "http://localhost:8080"
+
+# At most 10 questions per minute per visitor (IP address).
+# namespace_id is any number you choose, unique within your Cloudflare account.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }

@@ -1,0 +1,14 @@
+{
+  "name": "pocket-rag",
+  "version": "0.1.0",
+  "description": "A tiny \"ask this site\" assistant for static sites: keyword retrieval, no vector database, Claude via the visitor's own key or an optional Cloudflare Worker proxy.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "pocket-rag": "bin/pocket-rag.mjs" },
+  "files": ["bin", "src", "widget", "worker"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "example": "node bin/pocket-rag.mjs build example/pocket-rag.config.json && node bin/pocket-rag.mjs check example/pocket-rag.config.json"
+  }
+}

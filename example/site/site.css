@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; --bg: #faf9f6; --text: #16181d; }
+@media (prefers-color-scheme: dark) { :root { --bg: #111317; --text: #e8e9ec; } }
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 system-ui, sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
+a { color: inherit; }
+.ask-link { font: inherit; border: 1px solid currentColor; border-radius: 999px; padding: 4px 12px; background: none; color: inherit; cursor: pointer; }
+/* Theming the widget: */
+pocket-rag-widget { --pr-accent: #7a3e9d; --pr-accent-hover: #5f2f7b; }
+@media (prefers-color-scheme: dark) { pocket-rag-widget { --pr-accent: #c89be3; --pr-accent-hover: #d9b8ee; --pr-on-accent: #16181d; } }

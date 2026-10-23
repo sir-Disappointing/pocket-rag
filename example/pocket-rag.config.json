@@ -1,0 +1,32 @@
+{
+  "name": "Chess Rules Explained",
+  "about": "a small website that explains the rules of chess",
+  "scope": "the rules of chess, chess tournaments and this website",
+  "lang": "en",
+  "content": ["content"],
+  "core": ["core.md"],
+  "synonyms": {
+    "horse": ["knight"],
+    "castle": ["rook", "castling"],
+    "tower": ["rook"],
+    "draw": ["stalemate", "repetition"],
+    "tie": ["draw"],
+    "win": ["checkmate"],
+    "phone": ["electronic devices"],
+    "timer": ["clock"],
+    "time": ["clock"]
+  },
+  "phrases": {
+    "goes first": ["moves first"],
+    "who starts": ["moves first"]
+  },
+  "out": "site/pocket-rag",
+  "worker": "worker",
+  "proxyUrl": "",
+  "ui": {
+    "welcome": "Hi! Ask me anything about the rules of chess.",
+    "suggestions": ["How does castling work?", "What is en passant?", "Is stalemate a win?"],
+    "privacyUrl": "privacy.html"
+  },
+  "checks": "checks.json"
+}
