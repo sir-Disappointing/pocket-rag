@@ -30,13 +30,21 @@ export function keyOf(text) {
   return normalize(text).replace(/[^a-z0-9]/g, "");
 }
 
+// Your own stopwords: words that appear everywhere in your content and so say nothing.
+const stopCache = new WeakMap();
+function extraStop(knowledge) {
+  let set = stopCache.get(knowledge);
+  if (!set) stopCache.set(knowledge, (set = new Set((knowledge.stopwords || []).map(normalize))));
+  return set;
+}
+
 function queryTerms(knowledge, text) {
   const L = lang(knowledge);
   const synonyms = { ...L.synonyms, ...(knowledge.synonyms || {}) };
   const terms = new Map(); // term → weight
   const add = (t, w) => terms.set(t, Math.max(terms.get(t) || 0, w));
   for (const raw of words(text)) {
-    if (L.stop.has(raw) || raw.length < 2) continue;
+    if (L.stop.has(raw) || extraStop(knowledge).has(raw) || raw.length < 2) continue;
     for (const v of L.variants(raw)) add(v, 1);
     if (/\d/.test(raw)) add(raw, 1);
     for (const syn of synonyms[raw] || []) {
