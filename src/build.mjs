@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LANGS, retrieve } from "./retrieve.mjs";
+import { LANGS } from "./retrieve.mjs";
 
 const KIT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MAX_CHUNK = 1500;
@@ -76,46 +76,50 @@ function keysFrom(md) {
   return keys;
 }
 
-export function chunkMarkdown(md, rel) {
-  const lines = md.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n/, "").split("\n");
-  const h1 = lines.find((l) => /^#\s+/.test(l));
-  const docTitle = h1 ? h1.replace(/^#\s+/, "").trim() : humanize(rel);
-  const sections = [];
-  let cur = { heading: null, lines: [] };
-  for (const line of lines) {
-    if (/^#\s+/.test(line)) continue;
-    const m = line.match(/^#{2,6}\s+(.+?)\s*#*$/);
-    if (m) {
-      sections.push(cur);
-      cur = { heading: m[1].trim(), lines: [] };
-    } else cur.lines.push(line);
-  }
-  sections.push(cur);
-
+// Sections ({ heading, anchor, text, keys }) to chunks with stable ids: "file#heading-slug".
+function sectionChunks(sections, docTitle, rel) {
   const base = rel.replace(/\.[^.]+$/, "");
   const chunks = [];
   const seen = new Map();
   for (const s of sections) {
-    const raw = s.lines.join("\n");
-    const text = plain(raw);
-    if (!text) continue;
-    const title = s.heading ? `${docTitle} › ${plain(s.heading)}` : docTitle;
-    let id = s.heading ? `${base}#${slug(s.heading)}` : base;
+    if (!s.text) continue;
+    const title = s.heading ? `${docTitle} › ${s.heading}` : docTitle;
+    let id = s.heading ? `${base}#${s.anchor || slug(s.heading)}` : base;
     const n = (seen.get(id) || 0) + 1;
     seen.set(id, n);
     if (n > 1) id += `-${n}`;
-    const keys = keysFrom(raw);
-    const parts = split(text);
+    const parts = split(s.text);
     parts.forEach((t, i) =>
       chunks.push({
         id: parts.length > 1 ? `${id}~${i + 1}` : id,
         title: parts.length > 1 ? `${title} (${i + 1})` : title,
         text: t,
-        ...(keys.length ? { keys } : {}),
+        ...(s.keys.length ? { keys: s.keys } : {}),
       })
     );
   }
   return chunks;
+}
+
+export function chunkMarkdown(md, rel) {
+  const lines = md.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n/, "").split("\n");
+  const h1 = lines.find((l) => /^#\s+/.test(l));
+  const docTitle = h1 ? plain(h1.replace(/^#\s+/, "").replace(/\s*\{#[^}]+\}\s*$/, "")) : humanize(rel);
+  const raw = [];
+  let cur = { heading: null, anchor: null, lines: [] };
+  for (const line of lines) {
+    if (/^#\s+/.test(line)) continue;
+    const m = line.match(/^#{2,6}\s+(.+?)\s*#*$/);
+    if (m) {
+      raw.push(cur);
+      // "## Heading {#custom-id}" (Hugo, Jekyll, VitePress) keeps its own anchor.
+      const anchor = m[1].match(/\s*\{#([^}]+)\}$/);
+      cur = { heading: plain(m[1].replace(/\s*\{#[^}]+\}$/, "")), anchor: anchor && anchor[1], lines: [] };
+    } else cur.lines.push(line);
+  }
+  raw.push(cur);
+  const sections = raw.map((r) => ({ heading: r.heading, anchor: r.anchor, text: plain(r.lines.join("\n")), keys: keysFrom(r.lines.join("\n")) }));
+  return sectionChunks(sections, docTitle, rel);
 }
 
 export function chunkText(txt, rel) {
@@ -135,28 +139,125 @@ export function chunkJson(data, rel) {
   });
 }
 
-function walk(p) {
+// Folders that are never content: dependencies, build output, and what pocket-rag writes itself.
+const SKIP_DIRS = new Set(["node_modules", "dist", "build", "_site", "out", ".next", ".astro", ".vitepress", "coverage", "vendor"]);
+
+function walk(p, skip) {
   const stat = fs.statSync(p);
   if (stat.isFile()) return [p];
   return fs
     .readdirSync(p)
     .filter((f) => !f.startsWith("."))
     .sort()
-    .flatMap((f) => walk(path.join(p, f)));
+    .map((f) => path.join(p, f))
+    .filter((f) => !skip(f))
+    .flatMap((f) => walk(f, skip));
+}
+
+// HTML pages: the main text, split at <h2> and <h3>. Navigation, header, footer and scripts are left out.
+export function htmlToText(html) {
+  const entities = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", euro: "€", copy: "©" };
+  return html
+    .replace(/<(br|hr)\b[^>]*>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/li>/gi, "")
+    .replace(/<\/(tr|dt|dd)>/gi, "\n")
+    .replace(/<\/(p|div|section|article|ul|ol|table|blockquote|pre|h[1-6]|figure)>/gi, "\n\n")
+    .replace(/<(td|th)\b[^>]*>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, e) =>
+      e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : entities[e.toLowerCase()] ?? m
+    )
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n(- \n)+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function chunkHtml(html, rel) {
+  let doc = html.replace(/\r\n/g, "\n");
+  // Keys comments are read per section below, other comments go.
+  doc = doc.replace(/<!--(?!\s*keys:)[\s\S]*?-->/g, "");
+  for (const tag of ["script", "style", "noscript", "template", "svg", "nav", "header", "footer", "aside", "form", "button"]) {
+    doc = doc.replace(new RegExp(`<${tag}\\b[\\s\\S]*?</${tag}>`, "gi"), "");
+  }
+  const pageTitle = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+  const main = doc.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i) || doc.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i) || doc.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+  let body = main ? main[1] : doc;
+  const h1 = body.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+  const docTitle = (h1 && htmlToText(h1[1])) || (pageTitle && htmlToText(pageTitle)) || humanize(rel);
+  if (h1) body = body.replace(h1[0], "");
+
+  const sections = [];
+  const re = /<h([23])\b([^>]*)>([\s\S]*?)<\/h\1>/gi;
+  let last = 0;
+  let cur = { heading: null, anchor: null };
+  const close = (end) => {
+    const part = body.slice(last, end);
+    sections.push({ ...cur, text: htmlToText(part.replace(/<!--[\s\S]*?-->/g, "")), keys: keysFrom(part) });
+  };
+  for (const m of body.matchAll(re)) {
+    close(m.index);
+    cur = { heading: htmlToText(m[3]), anchor: (m[2].match(/\bid=["']([^"']+)["']/) || [])[1] || null };
+    last = m.index + m[0].length;
+  }
+  close(body.length);
+  return sectionChunks(sections, docTitle, rel);
+}
+
+// MDX: drop imports, exports and components, keep the Markdown.
+export function mdxToMarkdown(src) {
+  return src
+    .replace(/^(import|export)\s.*$/gm, "")
+    .replace(/<([A-Z][\w.]*)\b[^>]*\/>/g, "")
+    .replace(/<\/?[A-Z][\w.]*\b[^>]*>/g, "")
+    .replace(/^\s*\{\/\*[\s\S]*?\*\/\}\s*$/gm, "");
+}
+
+// Only JSON shaped like content counts; package.json and friends are skipped quietly.
+const isChunkJson = (data) => {
+  const list = Array.isArray(data) ? data : data && data.chunks;
+  return Array.isArray(list) && list.length > 0 && list.every((c) => c && typeof c === "object" && "title" in c && "text" in c);
+};
+
+export function contentFiles(config) {
+  const own = [config.out || "pocket-rag", config.worker].filter(Boolean).map((p) => config.resolve(p));
+  const excluded = [].concat(config.exclude || []).map((p) => config.resolve(p));
+  const skip = (f) => SKIP_DIRS.has(path.basename(f)) || own.includes(f) || excluded.includes(f);
+  const files = [];
+  for (const entry of [].concat(config.content || [])) {
+    const root = config.resolve(entry);
+    if (!fs.existsSync(root)) throw new Error(`content: "${entry}" doesn't exist (relative to ${path.relative(process.cwd(), config.dir) || "."})`);
+    const rootDir = fs.statSync(root).isFile() ? path.dirname(root) : root;
+    for (const file of walk(root, skip)) {
+      const name = path.basename(file);
+      if (name === "pocket-rag.config.json" || file === config.resolve(config.checks || "checks.json")) continue;
+      const ext = path.extname(file).toLowerCase();
+      if (![".md", ".markdown", ".mdx", ".txt", ".json", ".html", ".htm"].includes(ext)) continue;
+      files.push({ file, rel: path.relative(rootDir, file).split(path.sep).join("/"), ext, explicit: file === root });
+    }
+  }
+  return files;
 }
 
 export function readContent(config) {
   const chunks = [];
-  for (const entry of [].concat(config.content || [])) {
-    const root = config.resolve(entry);
-    const rootDir = fs.statSync(root).isFile() ? path.dirname(root) : root;
-    for (const file of walk(root)) {
-      const rel = path.relative(rootDir, file).split(path.sep).join("/");
-      const ext = path.extname(file).toLowerCase();
-      const src = fs.readFileSync(file, "utf8");
-      if (ext === ".md" || ext === ".markdown") chunks.push(...chunkMarkdown(src, rel));
-      else if (ext === ".txt") chunks.push(...chunkText(src, rel));
-      else if (ext === ".json") chunks.push(...chunkJson(JSON.parse(src), rel));
+  for (const { file, rel, ext, explicit } of contentFiles(config)) {
+    const src = fs.readFileSync(file, "utf8");
+    if (ext === ".md" || ext === ".markdown") chunks.push(...chunkMarkdown(src, rel));
+    else if (ext === ".mdx") chunks.push(...chunkMarkdown(mdxToMarkdown(src), rel));
+    else if (ext === ".txt") chunks.push(...chunkText(src, rel));
+    else if (ext === ".html" || ext === ".htm") chunks.push(...chunkHtml(src, rel));
+    else if (ext === ".json") {
+      let data;
+      try {
+        data = JSON.parse(src);
+      } catch (err) {
+        if (explicit) throw new Error(`${rel}: ${err.message}`);
+        continue;
+      }
+      if (explicit || isChunkJson(data)) chunks.push(...chunkJson(data, rel));
     }
   }
   const ids = new Set();
@@ -228,7 +329,14 @@ export function build(configPath, log = console.log, overrides = {}) {
 
   const out = config.resolve(config.out || "pocket-rag");
   fs.mkdirSync(out, { recursive: true });
-  for (const f of RUNTIME) copy(path.join(KIT, "src", f), path.join(out, f));
+  // Before 0.3 these were .mjs; remove the old copies when upgrading.
+  for (const f of RUNTIME) fs.rmSync(path.join(out, f), { force: true });
+  // In the browser the search code is served as .js: not every web server knows the .mjs type.
+  for (const f of RUNTIME) {
+    const to = path.join(out, f.replace(/\.mjs$/, ".js"));
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.writeFileSync(to, fs.readFileSync(path.join(KIT, "src", f), "utf8").replace(/(from "\.\/lang\/\w+)\.mjs"/g, '$1.js"'));
+  }
   copy(path.join(KIT, "widget", "widget.js"), path.join(out, "widget.js"));
   copy(path.join(KIT, "widget", "widget.css"), path.join(out, "widget.css"));
   fs.writeFileSync(path.join(out, "knowledge.json"), JSON.stringify(knowledge));
@@ -254,30 +362,4 @@ export function build(configPath, log = console.log, overrides = {}) {
   // Prompt caching needs a minimum prefix length (512 tokens for Claude Haiku 5.5).
   if (tokens(knowledge.core.length) < 600) log("Note: the core is short, so it may be below the minimum for prompt caching. That's fine: a short core is cheap anyway.");
   return { config, knowledge, settings };
-}
-
-// ------------------------------------------------------------ checking
-
-// checks.json: [{ "q": "question", "expect": ["chunk-id", "id-prefix#"], "previous": "optional earlier question" }]
-export function check(configPath, log = console.log, overrides = {}) {
-  const config = loadConfig(configPath, overrides);
-  if (!config.checks) throw new Error(`${configPath}: add "checks": "checks.json" to test the search`);
-  const knowledge = makeKnowledge(config);
-  const cases = JSON.parse(fs.readFileSync(config.resolve(config.checks), "utf8"));
-  let failed = 0;
-  let chars = 0;
-  let pieces = 0;
-  for (const c of cases) {
-    const got = retrieve(knowledge, c.q, c.previous || "");
-    const ids = got.map((g) => g.id);
-    chars += got.reduce((n, g) => n + g.title.length + g.text.length, 0);
-    pieces += got.length;
-    if (!c.expect.some((e) => ids.some((id) => id === e || id.startsWith(e)))) {
-      failed++;
-      log(`MISS  ${c.q}\n      expected one of: ${c.expect.join(", ")}\n      found: ${ids.join(", ") || "(nothing)"}`);
-    }
-  }
-  const per = cases.length ? Math.round(chars / cases.length / 3.8) : 0;
-  log(`${cases.length - failed}/${cases.length} found. On average ${(pieces / Math.max(1, cases.length)).toFixed(1)} chunks, ~${per} tokens of sources per question.`);
-  return { failed, total: cases.length };
 }

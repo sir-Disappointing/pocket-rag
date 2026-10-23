@@ -1,11 +1,11 @@
 {
   "name": "pocket-rag",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A tiny \"ask this site\" assistant for static sites: keyword retrieval, no vector database, Claude via the visitor's own key or an optional Cloudflare Worker proxy.",
   "license": "MIT",
   "type": "module",
   "bin": { "pocket-rag": "bin/pocket-rag.mjs" },
-  "files": ["bin", "src", "widget", "worker"],
+  "files": ["bin", "src", "widget", "worker", "SETUP.md"],
   "engines": { "node": ">=20" },
   "scripts": {
     "test": "node --test test/*.test.mjs",

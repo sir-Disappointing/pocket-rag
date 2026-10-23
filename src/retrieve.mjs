@@ -30,6 +30,14 @@ export function keyOf(text) {
   return normalize(text).replace(/[^a-z0-9]/g, "");
 }
 
+// The meaningful words of a question, each with the variants the search tries.
+export function contentWords(knowledge, text) {
+  const L = lang(knowledge);
+  return words(text)
+    .filter((w) => !L.stop.has(w) && !extraStop(knowledge).has(w) && w.length >= 2)
+    .map((w) => ({ word: w, variants: [...new Set([...L.variants(w), ...(/\d/.test(w) ? [w] : [])])] }));
+}
+
 // Your own stopwords: words that appear everywhere in your content and so say nothing.
 const stopCache = new WeakMap();
 function extraStop(knowledge) {
@@ -111,6 +119,12 @@ function directHits(knowledge, question) {
 }
 
 export function retrieve(knowledge, question, previous = "") {
+  return explain(knowledge, question, previous).picked;
+}
+
+// The whole search with its reasons: which terms were searched, which chunks scored and why,
+// and which were picked. `pocket-rag ask` and `pocket-rag check` show this.
+export function explain(knowledge, question, previous = "") {
   const tuning = { ...DEFAULTS, ...(knowledge.tuning || {}) };
   const idx = index(knowledge);
   const terms = queryTerms(knowledge, question);
@@ -119,6 +133,8 @@ export function retrieve(knowledge, question, previous = "") {
 
   const n = idx.docs.length;
   const scores = idx.docs.map(() => 0);
+  const matched = idx.docs.map(() => []);
+  const termInfo = [];
   for (const [term, weight] of terms) {
     const tfs = idx.docs.map((d) => occurrences(d.text, term));
     let df = idx.df.get(term);
@@ -126,12 +142,14 @@ export function retrieve(knowledge, question, previous = "") {
       df = tfs.filter(Boolean).length;
       idx.df.set(term, df);
     }
+    termInfo.push({ term, weight, df });
     if (!df) continue;
     const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5));
     tfs.forEach((tf, i) => {
       if (!tf) return;
       const d = idx.docs[i];
       scores[i] += weight * idf * ((tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * d.len) / idx.avgLen)));
+      matched[i].push(term);
     });
   }
 
@@ -144,10 +162,11 @@ export function retrieve(knowledge, question, previous = "") {
   }
 
   const ranked = idx.docs
-    .map((d, i) => ({ chunk: d.chunk, score: scores[i] }))
+    .map((d, i) => ({ chunk: d.chunk, score: scores[i], terms: matched[i] }))
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score);
   const top = ranked.length ? ranked[0].score : 0;
+  const cutoff = top * tuning.minRatio;
 
   const picked = [];
   let chars = 0;
@@ -158,12 +177,13 @@ export function retrieve(knowledge, question, previous = "") {
     picked.push(c);
     chars += size;
   };
-  directHits(knowledge, question).forEach(take);
+  const keyHits = directHits(knowledge, question);
+  keyHits.forEach(take);
   for (const r of ranked) {
-    if (r.score < top * tuning.minRatio) break;
+    if (r.score < cutoff) break;
     take(r.chunk);
   }
-  return picked;
+  return { terms: termInfo, keyHits, ranked, cutoff, picked, tuning };
 }
 
 // The fixed core as the system prompt. It is the same every time, so it gets cached.

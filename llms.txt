@@ -1,0 +1,15 @@
+# pocket-rag
+
+> A tiny "ask this site" assistant for static sites. A build step turns the site's Markdown/HTML into a small knowledge base; a drop-in widget answers visitors' questions with Claude, sending only the sections that match (keyword search, no vector database). Visitors use their own Anthropic API key, or the owner deploys an optional Cloudflare Worker proxy.
+
+To add pocket-rag to a website, follow the setup guide step by step. The CLI (`init`, `build`, `ask`, `check`, `doctor`) prints what to do next, and `doctor` tells you when the setup is complete.
+
+## Docs
+
+- [Setup guide](https://raw.githubusercontent.com/sir-Disappointing/pocket-rag/main/SETUP.md): step by step, written for AI coding assistants
+- [README](https://raw.githubusercontent.com/sir-Disappointing/pocket-rag/main/README.md): all configuration options, theming, the proxy, costs and limits
+
+## Optional
+
+- [Example site](https://github.com/sir-Disappointing/pocket-rag/tree/main/example): config, content and checks for a small chess rules site
+- [Live demo](https://sir-disappointing.github.io/pocket-rag/)
