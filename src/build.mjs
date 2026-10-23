@@ -356,10 +356,10 @@ export function build(configPath, log = console.log, overrides = {}) {
 
   const tokens = (chars) => Math.round(chars / 3.8);
   const total = knowledge.chunks.reduce((n, c) => n + c.title.length + c.text.length, 0);
-  log(`${config.name}: core ~${tokens(knowledge.core.length)} tokens, ${knowledge.chunks.length} chunks (~${tokens(total)} tokens in all).`);
+  log(`${config.name}: system prompt ~${tokens(knowledge.core.length)} tokens (instructions${[].concat(config.core || []).length ? " plus core files" : ""}), ${knowledge.chunks.length} chunks to search (~${tokens(total)} tokens in all).`);
   const rel = (p) => path.relative(process.cwd(), p) || ".";
   log(`Wrote ${rel(out)}/${config.worker ? ` and ${rel(config.resolve(config.worker))}/src/` : ""}`);
   // Prompt caching needs a minimum prefix length (512 tokens for Claude Haiku 5.5).
-  if (tokens(knowledge.core.length) < 600) log("Note: the core is short, so it may be below the minimum for prompt caching. That's fine: a short core is cheap anyway.");
+  if (tokens(knowledge.core.length) < 600) log("Note: the system prompt is short, so it may be below the minimum for prompt caching. That's fine: a short prompt is cheap anyway.");
   return { config, knowledge, settings };
 }

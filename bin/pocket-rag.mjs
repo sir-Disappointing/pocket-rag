@@ -74,7 +74,9 @@ function init() {
   const report = { detected: site, written, kept, config: fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, "utf8")) : config };
   const lines = [
     `Site: ${site.frameworkName}${site.layouts.length ? ` (layout: ${site.layouts.join(", ")})` : ""}`,
-    `Published folder: ${site.publicDir}  →  widget goes in ${site.out}/`,
+    site.copy
+      ? `Widget folder: ${site.out}/  (${site.frameworkName} publishes ${site.publishes}/; copy it there with: ${site.copy})`
+      : `Published folder: ${site.publicDir}  →  widget goes in ${site.out}/`,
     `Content: ${site.candidates.length ? site.candidates.slice(0, 5).map((c) => `${c.folder} (${c.files} files)`).join(", ") : "none found; created content/about.md"}`,
     `Language: ${site.lang}${site.langSupported ? "" : ` (the site says "${site.langFound}"; no word list for that yet, using en)`}. Name: ${site.name}`,
     "",

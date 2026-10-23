@@ -74,9 +74,14 @@ const FRAMEWORKS = [
     name: "Eleventy",
     match: (d) => exists(d, ".eleventy.js", "eleventy.config.js", "eleventy.config.mjs", "eleventy.config.cjs"),
     publicDir: ".",
+    publishes: (d) => {
+      const cfg = read(path.join(d, exists(d, ".eleventy.js", "eleventy.config.js", "eleventy.config.mjs", "eleventy.config.cjs")));
+      return (cfg.match(/output\s*:\s*["'`]([^"'`]+)/) || [])[1] || "_site";
+    },
+    copy: 'eleventyConfig.addPassthroughCopy("pocket-rag");',
     content: ["src", "content", "posts", "."],
     layout: ["_includes", "src/_includes"],
-    script: 'In your base layout (_includes/…) before </body>: `<script type="module" src="/pocket-rag/widget.js"></script>`. Also add `eleventyConfig.addPassthroughCopy("pocket-rag")` (with the same path as "out"), or the files won\'t be published.',
+    script: 'In your base layout (_includes/…) before </body>: `<script type="module" src="/pocket-rag/widget.js"></script>`. Also add `eleventyConfig.addPassthroughCopy("pocket-rag");` to the Eleventy config, or the files won\'t be published.',
   },
   {
     id: "mkdocs",
@@ -161,9 +166,13 @@ function firstHtml(dir, publicDir) {
 }
 
 function siteName(dir, html, layouts) {
-  const titleOf = (text) => {
+  // "Home | Oak Lane Garden" and "{{ title }} | Oak Lane Garden" both give the site's name.
+  const titleOf = (text, layout = false) => {
     const t = (text.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1];
-    return t && !/[{}]/.test(t) ? t.split(/\s[|–—-]\s/)[0].trim() : null;
+    if (!t) return null;
+    const parts = t.split(/\s[|–—-]\s/).map((p) => p.trim()).filter((p) => p && !/[{}]|%\s*\w/.test(p));
+    if (!parts.length) return null;
+    return layout || parts.length === 1 ? parts.at(-1) : parts[0];
   };
   const fromHtml = html && titleOf(html.text);
   if (fromHtml) return fromHtml;
@@ -175,7 +184,7 @@ function siteName(dir, html, layouts) {
     const p = path.join(dir, l);
     const files = fs.existsSync(p) && fs.statSync(p).isDirectory() ? fs.readdirSync(p).map((f) => path.join(p, f)) : [p];
     for (const f of files) {
-      const t = titleOf(read(f));
+      const t = titleOf(read(f), true);
       if (t) return t;
     }
   }
@@ -210,6 +219,8 @@ export function detect(dir = ".") {
     framework: fw.id,
     frameworkName: fw.name,
     publicDir,
+    publishes: fw.publishes ? fw.publishes(dir) : publicDir,
+    ...(fw.copy ? { copy: fw.copy } : {}),
     out: path.join(publicDir, "pocket-rag").split(path.sep).join("/"),
     content: candidates.length ? candidates.slice(0, 3).map((c) => c.folder) : preferred.slice(0, 1),
     candidates,

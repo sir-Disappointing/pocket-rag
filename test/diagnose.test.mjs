@@ -130,7 +130,7 @@ test("doctor: a finished site is all green", () => {
       '<h1>Crumb</h1><p>We sell sourdough bread.</p><script type="module" src="pocket-rag/widget.js"></script>',
       `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.anthropic.com">`
     ),
-    "privacy.html": PAGE("<p>Privacy</p>"),
+    "privacy.html": PAGE("<p>Questions to the assistant go to Anthropic.</p>"),
     "checks.json": checks,
     "pocket-rag.config.json": { name: "Crumb", scope: "our bakery", content: ["index.html"], out: "pocket-rag", checks: "checks.json", ui: { privacyUrl: "privacy.html" } },
   });
@@ -149,4 +149,44 @@ test("doctor: finds an API key in the site and a CSP that blocks the proxy", () 
   const r = doctor(path.join(dir, "pocket-rag.config.json"), dir);
   assert.equal(r.results.find((x) => x.id === "secrets").status, "error");
   assert.match(r.results.find((x) => x.id === "csp").message, /proxy\.example\.workers\.dev/);
+});
+
+test("detect: Eleventy names its real output folder and the copy line; name from a templated title", () => {
+  const d = detect(site({ ".eleventy.js": 'module.exports = () => ({ dir: { input: "src", output: "public_html" } });', "src/a.md": "# A", "src/_includes/base.njk": "<title>{{ title }} | Oak Lane Garden</title>", "package.json": { name: "oak-lane" } }));
+  assert.equal(d.framework, "eleventy");
+  assert.equal(d.publishes, "public_html");
+  assert.equal(d.copy, 'eleventyConfig.addPassthroughCopy("pocket-rag");');
+  assert.equal(d.name, "Oak Lane Garden");
+});
+
+test("check suggests a phrase for multi-word expressions, never a synonym for 'up'", () => {
+  const dir = site({
+    "content/m.md": "# Membership\n\n## Joining\nFill in the form at the shed.\n",
+    "checks.json": [{ q: "how do i sign up", expect: ["m#joining"] }],
+    "pocket-rag.config.json": { name: "Garden", content: ["content"], checks: "checks.json" },
+  });
+  const [c] = runChecks(loadConfig(path.join(dir, "pocket-rag.config.json"))).cases;
+  assert.deepEqual(c.suggestion, { phrases: { "sign up": ["joining"] } });
+});
+
+test("ask says why a ranked chunk wasn't sent", () => {
+  const knowledge = makeKnowledge(loadConfig(EXAMPLE));
+  const r = ask(knowledge, "pawn");
+  for (const x of r.ranked) assert.equal(x.sent, !x.why);
+  assert.ok(r.ranked.every((x) => x.sent || ["below cutoff", "limit reached"].includes(x.why)));
+});
+
+test("doctor finds the privacy page in the content folders and checks it mentions the assistant", () => {
+  const files = {
+    ".eleventy.js": 'module.exports = (c) => { c.addPassthroughCopy("pocket-rag"); };',
+    "src/index.md": "# Garden\n\nWelcome.",
+    "src/privacy.md": "# Privacy\n\nWe keep a spreadsheet.",
+    "pocket-rag.config.json": { name: "Garden", content: ["src"], out: "pocket-rag", ui: { privacyUrl: "/privacy/" } },
+  };
+  let dir = site(files);
+  const privacy = () => doctor(path.join(dir, "pocket-rag.config.json"), dir).results.find((x) => x.id === "privacy");
+  assert.equal(privacy().status, "warn");
+  assert.match(privacy().message, /doesn't mention the assistant/);
+  dir = site({ ...files, "src/privacy.md": "# Privacy\n\nQuestions go to Anthropic." });
+  assert.equal(privacy().status, "ok");
 });

@@ -27,7 +27,15 @@ export function ask(knowledge, question, previous = "") {
     notInContent: [...new Set(contentWords(knowledge, question).filter((w) => !w.variants.some((v) => ex.terms.find((t) => t.term === v && t.df)) && !hasSynonym(knowledge, w.word)).map((w) => w.word))],
     keyHits: ex.keyHits.map((c) => c.id),
     cutoff: Math.round(ex.cutoff * 100) / 100,
-    ranked: ex.ranked.slice(0, 15).map((r, i) => ({ rank: i + 1, id: r.chunk.id, title: r.chunk.title, score: Math.round(r.score * 100) / 100, matched: r.terms, sent: picked.has(r.chunk.id) })),
+    ranked: ex.ranked.slice(0, 15).map((r, i) => ({
+      rank: i + 1,
+      id: r.chunk.id,
+      title: r.chunk.title,
+      score: Math.round(r.score * 100) / 100,
+      matched: r.terms,
+      sent: picked.has(r.chunk.id),
+      ...(picked.has(r.chunk.id) ? {} : { why: r.score < ex.cutoff ? "below cutoff" : "limit reached" }),
+    })),
     sent: ex.picked.map((c) => ({ id: c.id, title: c.title, tokens: TOKENS(size(c)) })),
     sentTokens: TOKENS(ex.picked.reduce((n, c) => n + size(c), 0)),
   };
@@ -38,8 +46,8 @@ export function formatAsk(r) {
   lines.push(`Search terms: ${r.terms.map((t) => `${t.term}${t.weight < 1 ? `×${t.weight}` : ""}${t.df ? ` (${t.df})` : " (nowhere)"}`).join(", ") || "(none: only stopwords)"}`);
   if (r.notInContent.length) lines.push(`Not in your content: ${r.notInContent.join(", ")}. Add a synonym if visitors use these words.`);
   if (r.keyHits.length) lines.push(`Key hits: ${r.keyHits.join(", ")}`);
-  lines.push("", `Best matches (sent if score ≥ ${r.cutoff}):`);
-  for (const x of r.ranked) lines.push(`${x.sent ? "→" : " "} ${String(x.rank).padStart(2)}. ${x.score.toFixed(2).padStart(6)}  ${x.id}  [${x.matched.join(", ")}]`);
+  lines.push("", `Best matches (→ = sent; the cutoff is ${r.cutoff}, 30% of the best score):`);
+  for (const x of r.ranked) lines.push(`${x.sent ? "→" : " "} ${String(x.rank).padStart(2)}. ${x.score.toFixed(2).padStart(6)}  ${x.id}  [${x.matched.join(", ")}]${x.why ? `  (${x.why})` : ""}`);
   if (!r.ranked.length) lines.push("   (no chunk matches)");
   lines.push("", `Sent: ${r.sent.length} chunks, ~${r.sentTokens} tokens.`);
   return lines.join("\n");
@@ -48,6 +56,9 @@ export function formatAsk(r) {
 // ------------------------------------------------------------ check
 
 const matches = (id, e) => id === e || id.startsWith(e);
+
+// Small words that only mean something together with the word before them ("sign up", "drop off").
+const PARTICLES = new Set(["up", "in", "out", "off", "on", "down", "over", "away", "back", "around", "through", "op", "uit", "af", "aan", "mee", "terug"]);
 
 // Words from a chunk's own heading: what a synonym should point to. Intro sections have none.
 function headingWords(knowledge, chunk) {
@@ -85,9 +96,28 @@ function diagnose(knowledge, c, ex) {
   const to = headingWords(knowledge, target);
   // Only words that appear nowhere get a synonym; a word that's elsewhere in the content would just
   // pull in the wrong sections.
-  const from = missingEverywhere.filter((w) => !to.includes(w)).slice(0, 3);
   const options = distinctiveWords(knowledge, target);
-  const suggestion = from.length && to.length ? { synonyms: Object.fromEntries(from.map((w) => [w, to])) } : null;
+  // Missing words next to each other ("sign up", "pick up") are a phrase, not separate synonyms.
+  const seq = c.q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").match(/[a-z0-9]+/g) || [];
+  const missing = new Set(missingEverywhere);
+  const phrases = [];
+  for (let i = 0; i < seq.length; i++) {
+    if (!missing.has(seq[i])) continue;
+    let j = i;
+    while (j + 1 < seq.length && (missing.has(seq[j + 1]) || PARTICLES.has(seq[j + 1]))) j++;
+    if (j > i) phrases.push(seq.slice(i, j + 1).join(" "));
+    i = j;
+  }
+  const inPhrase = new Set(phrases.flatMap((p) => p.split(" ")));
+  const from = missingEverywhere.filter((w) => !to.includes(w) && !inPhrase.has(w) && w.length > 2 && !PARTICLES.has(w)).slice(0, 3);
+  const target2 = to.length ? to : options.slice(0, 1);
+  const suggestion =
+    (phrases.length || from.length) && target2.length
+      ? {
+          ...(from.length && to.length ? { synonyms: Object.fromEntries(from.map((w) => [w, to])) } : {}),
+          ...(phrases.length ? { phrases: Object.fromEntries(phrases.map((p) => [p, target2])) } : {}),
+        }
+      : null;
   const quoted = (list) => list.map((w) => `"${w}"`).join(", ");
   const place = pos < 0 ? "doesn't match at all" : `ranks #${pos + 1} (score ${ex.ranked[pos].score.toFixed(2)}; the cutoff is ${ex.cutoff.toFixed(2)}, the best is "${ex.ranked[0].chunk.title}" with ${ex.ranked[0].score.toFixed(2)})`;
 
@@ -98,8 +128,8 @@ function diagnose(knowledge, c, ex) {
       ...(pos >= 0 ? { rank: pos + 1 } : {}),
       hint: `${quoted(missingEverywhere)} ${missingEverywhere.length > 1 ? "don't" : "doesn't"} appear anywhere in your content, so "${target.title}" ${place}. ${
         suggestion
-          ? `Try: "synonyms": ${JSON.stringify(suggestion.synonyms)}.`
-          : `Add a synonym from ${quoted(missingEverywhere.slice(0, 2))} to a word in that section that means the same (its distinctive words: ${options.join(", ")}), or a "phrases" entry.`
+          ? `Try: ${Object.entries(suggestion).map(([k, v]) => `"${k}": ${JSON.stringify(v)}`).join(" and ")}.`
+          : `Add a synonym from ${quoted(missingEverywhere.slice(0, 2))} to a word in that section that means the same (its distinctive words: ${options.join(", ")}), or a "phrases" entry for a multi-word expression.`
       } Only map words that really mean the same thing.`,
       suggestion,
       options,
@@ -228,8 +258,8 @@ export function doctor(configPath, root = process.cwd()) {
     const dup = [...titles].filter(([, n]) => n > 1 && n < 50).map(([t]) => t);
     if (dup.length > 3) add("content-titles", WARN, `${dup.length} titles appear more than once, e.g. "${dup[0]}".`, "Give pages a unique # title (or <h1>), so the sources Claude sees are easy to tell apart.");
     const coreTokens = TOKENS(knowledge.core.length);
-    if (coreTokens > 4000) add("core", WARN, `The core is ~${coreTokens} tokens and goes with every question.`, "Keep only the most important facts in \"core\" (1–2k tokens); everything else belongs in \"content\".");
-    else add("core", OK, `Core ~${coreTokens} tokens${coreTokens < 520 ? " (too short to be cached, but cheap)" : ", cached"}.`);
+    if (coreTokens > 4000) add("core", WARN, `The system prompt (instructions plus "core" files) is ~${coreTokens} tokens and goes with every question.`, "Keep only the most important facts in the \"core\" files (1–2k tokens); everything else belongs in \"content\".");
+    else add("core", OK, `System prompt (instructions${[].concat(config.core || []).length ? " plus core files" : ""}) ~${coreTokens} tokens${coreTokens < 520 ? ": too short for prompt caching, but cheap anyway" : ", cached"}.`);
   }
   if (!config.scope && !config.instructions) add("scope", WARN, "No \"scope\" in the config: the assistant will answer questions about \"the topics of this site\".", "Set \"scope\" to what it should answer about, e.g. \"our products, orders and returns\".");
 
@@ -311,12 +341,14 @@ export function doctor(configPath, root = process.cwd()) {
   if (!privacy) add("privacy", WARN, "No privacy link in the chat (ui.privacyUrl).", "Questions go to Anthropic, so tell visitors. Add a privacy page or section (a starting point: https://github.com/sir-Disappointing/pocket-rag/blob/main/example/site/privacy.html) and set ui.privacyUrl to it.");
   else if (/^(https?:)?\/\//.test(privacy) || privacy.includes("#")) add("privacy", OK, `Privacy link: ${privacy}.`);
   else {
-    const p = privacy.replace(/^\.?\//, "").replace(/\/$/, "");
-    const base = p.replace(/\.html?$/, "");
-    const candidates = [p, `${base}.html`, `${base}/index.html`, `${base}.md`, `${base}/index.md`, `content/${base}.md`, `src/pages/${base}.astro`, `src/pages/${base}.md`, `docs/${base}.md`];
-    const found = [publicDir, root].some((d) => candidates.some((c) => fs.existsSync(path.join(d, c))));
-    if (found) add("privacy", OK, `Privacy link: ${privacy}.`);
-    else add("privacy", WARN, `ui.privacyUrl is "${privacy}", but no such page was found.`, "Create that page, or point ui.privacyUrl at the existing privacy page.");
+    // Look for the page's source where the site's frameworks keep pages.
+    const p = privacy.replace(/^\.?\//, "").replace(/\/$/, "").replace(/\.html?$/, "");
+    const dirs = [...new Set([publicDir, root, ...[].concat(config.content || []).map((c) => config.resolve(c)), ...["src", "src/pages", "content", "docs", "pages", "app"].map((d) => path.join(root, d))])];
+    const names = [".html", ".htm", ".md", ".mdx", ".njk", ".liquid", ".astro", "/index.html", "/index.md", "/index.mdx", "/index.njk", "/page.tsx", "/page.jsx", "/page.mdx"].map((ext) => p + ext);
+    const page = dirs.flatMap((d) => names.map((n) => path.join(d, n))).find((f) => fs.existsSync(f) && fs.statSync(f).isFile());
+    if (!page) add("privacy", WARN, `ui.privacyUrl is "${privacy}", but no page for it was found${site.frameworkName !== "unknown" ? "" : ""}.`, "Create that page (SETUP.md step 7 has the text), or point ui.privacyUrl at the existing privacy page.");
+    else if (!/anthropic/i.test(fs.readFileSync(page, "utf8"))) add("privacy", WARN, `The privacy page (${rel(page)}) doesn't mention the assistant or Anthropic yet.`, "Add the section from SETUP.md step 7.");
+    else add("privacy", OK, `Privacy link: ${privacy} (${rel(page)} mentions the assistant).`);
   }
 
   // Secrets

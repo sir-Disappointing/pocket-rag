@@ -46,11 +46,12 @@ Open `pocket-rag.config.json`:
 - **`about`**: half a sentence that completes "You are the assistant of <name>, …", e.g. `"a bakery on Elm Street in Utrecht"`.
 - **`scope`**: what the assistant answers questions about, e.g. `"our bread, opening hours, orders and allergies"`. Other questions are politely declined.
 - **`content`**: the folders or files with the real pages. Supported: Markdown (`.md`, `.mdx`), HTML (`.html`; only the main text is used, and navigation, header and footer are skipped), JSON (`[{ "title", "text" }]`) and `.txt`.
-  - Leave out pages that don't help answer questions (privacy, legal, 404, tag and archive pages) with `"exclude": ["privacy.html", "tags"]`.
+  - Leave out pages that don't help answer questions (legal, 404, tag and archive pages) with a top-level `"exclude"` list. Its paths are relative to the config file, like `content`: `"exclude": ["src/404.md", "src/tags"]`. Keeping the privacy page in is fine: then the assistant can answer "what happens to my questions?".
   - `node_modules`, build output and pocket-rag's own folders are skipped automatically.
 - **`lang`**: `"en"` or `"nl"`. It sets the search's word lists and the chat's texts. For another language, use `"en"`: answers still come in the visitor's language.
 - **`ui.suggestions`**: two or three questions a visitor would really ask, shown as buttons.
-- **`core`** (optional): a Markdown file sent with every question. Use it for the 10–30 most important facts (contact details, opening hours, prices, the main rules), so they're always at hand. Keep it under about 1,500 words.
+- **`ui.welcome`**: the chat's first message. The default is "Hi! Ask me anything about this site."; something specific is friendlier, e.g. "Hi! Ask me about opening hours, orders or allergies."
+- **`core`** (optional): a list of Markdown files sent with every question, e.g. `"core": ["assistant-core.md"]`. Use it for the 10–30 most important facts (contact details, opening hours, prices, the main rules), so they're always at hand. Keep it under about 1,500 words. `build` and `doctor` report the size of the whole system prompt, which is the instructions plus these files; it's never empty, even with `"core": []`.
 
 Leave `out` as `init` set it, unless the site publishes from a different folder.
 
@@ -138,7 +139,19 @@ pocket-rag-widget {
 }
 ```
 
-All properties, with their dark-mode values, are at the top of `widget.css` in the output folder. Check that text on `--pr-accent` stays readable in both light and dark mode.
+Other properties:
+- `--pr-on-fab`: text and icon colour on the floating button;
+- `--pr-fab-hover`: the button's hover colour;
+- `--pr-bg`, `--pr-soft`, `--pr-text`, `--pr-muted`, `--pr-line`, `--pr-line-strong`: the panel;
+- `--pr-error-bg`, `--pr-error-text`: error messages.
+
+All of them, with their defaults, are at the top of `widget.css` in the output folder.
+
+**Dark mode:** the widget follows the visitor's light/dark setting by itself. Any property you set replaces its default in both modes:
+- **If the site has a dark mode** with its own variables, use those variables (as above), and both modes match.
+- **If the site has no dark mode,** set only the accent and font: everything else keeps adapting. Or set the panel colours too, so the widget stays light like the site.
+
+Check that text on `--pr-accent` stays readable in every mode the site has.
 
 ## 9. Test the search with real questions
 
@@ -170,7 +183,7 @@ For every miss it says why, and what to change:
 - **The right section loses to others:** its heading probably doesn't say what it's about. Better headings help visitors too. Otherwise use `"tuning": { "boost": { "guide/": 1.25 } }` to prefer sections whose id starts with that prefix.
 - **Words that are everywhere** (the site's own name, or "bord" on a traffic-sign site): `"stopwords": ["…"]`.
 
-Build and check again until everything passes. If a question really has no answer in the content, that's a content gap: tell the owner and remove the check. Don't point it at an unrelated section.
+`check` and `ask` read the config and the content directly, so you don't need to build between runs. Repeat until everything passes, then build once more (`doctor` warns when the build is out of date). If a question really has no answer in the content, that's a content gap: tell the owner and remove the check. Don't point it at an unrelated section.
 
 ## 10. Run `doctor` until it's green
 
@@ -196,20 +209,27 @@ Serve the site the way it's normally previewed (`npm run dev`, `hugo server`, `n
 - in own-key mode, clicking it shows a form for the visitor's API key. That's correct; don't enter a key.
 - the browser console shows no errors about `pocket-rag`, CSP or MIME types.
 
-The owner can try a real question with their own key afterwards.
+If the site can't be served here (dependencies not installed, no dev server), skip this step, rely on `doctor`, and tell the owner to check it on their next preview. The owner can try a real question with their own key afterwards.
 
 ## 12. Keep it up to date
 
 The knowledge base is a snapshot of the content. Rebuild whenever the content changes:
 
-- **If the site has a build step** (`package.json`), add pocket-rag to it, so it can't go stale:
+- **If the site has a `package.json` with a build script,** make the build run pocket-rag first.
+  - **Installed as a dev dependency (step 1):**
 
-  ```json
-  "scripts": { "prebuild": "pocket-rag build && pocket-rag check" }
-  ```
+    ```json
+    "scripts": { "prebuild": "pocket-rag build && pocket-rag check" }
+    ```
 
-  The output folder can then go in `.gitignore`, if the site is built in CI.
-- **If it doesn't,** commit the output folder, and rebuild after content changes.
+  - **Without the dev dependency,** use the full command in the script instead: `npx --yes github:sir-Disappointing/pocket-rag#v0.3.0 build`.
+
+  `prebuild` runs before `npm run build` only. If the dev server (`npm start`, `npm run dev`) should pick up changes too, add the same line as `prestart` or `predev`. Tell the owner to run `npm install` once.
+- **If the site has no build script,** rebuild by hand after content changes.
+- **Commit the output folder or not?** Look at how the site is published:
+  - if a host or CI runs `npm run build` (Netlify, Vercel, Cloudflare Pages, a GitHub Actions workflow), the output can go in `.gitignore`;
+  - if the repository's files are published as they are (GitHub Pages without a workflow, plain hosting), commit it.
+  - When unsure, commit it.
 - **With a proxy,** also run `npx wrangler deploy` in `worker/` after a rebuild.
 
 ## 13. Tell the owner what you did
